@@ -121,17 +121,33 @@
             NSLog(@"ReverseImageSearch: ukiyo-e response was not JSON: %@", json_error);
             return;
         }
-        NSString *status = [json objectForKey:@"status"];
-        NSString *results = [json objectForKey:@"results"];
-        if (![status isEqualToString:@"SUCCESS"] || results.length == 0)
+        // The response is remote and untrusted: validate the JSON shape before
+        // using it, so an unexpected type (e.g. a number or object) cannot crash us.
+        id status = [json objectForKey:@"status"];
+        id results = [json objectForKey:@"results"];
+        if (![status isKindOfClass:[NSString class]] ||
+            ![results isKindOfClass:[NSString class]] ||
+            ![(NSString *)status isEqualToString:@"SUCCESS"] ||
+            [(NSString *)results length] == 0)
         {
             NSLog(@"ReverseImageSearch: ukiyo-e search was unsuccessful: %@", json);
             return;
         }
-        NSURL *results_url = [NSURL URLWithString:results relativeToURL:url];
+        NSURL *results_url = [NSURL URLWithString:(NSString *)results relativeToURL:url];
         if (!results_url)
         {
             NSLog(@"ReverseImageSearch: ukiyo-e returned an invalid results path: %@", results);
+            return;
+        }
+        // URLWithString:relativeToURL: ignores the base when results is absolute,
+        // so an off-site value (e.g. https://evil.com) would otherwise be opened.
+        // Restrict results to the configured endpoint's host over https.  Deriving
+        // the host from the (trusted, local) endpoint avoids drift if the plist
+        // changes, and fails safe: a nil host rejects every candidate.
+        if (![results_url.scheme isEqualToString:@"https"] ||
+            ![results_url.host isEqualToString:url.host])
+        {
+            NSLog(@"ReverseImageSearch: ukiyo-e returned an off-site results URL: %@", results_url);
             return;
         }
         [self openURL:results_url inPage:page];
